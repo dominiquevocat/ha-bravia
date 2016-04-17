@@ -1,5 +1,5 @@
 # ha-bravia
-Bravia TV support for home-assistant.io
+##Bravia TV support for home-assistant.io
 
 place it in .../site-packages/homeassistant/components/media_player
 
@@ -12,17 +12,20 @@ to your configuration.yaml
 
 Works kinda. Needs work still.
 
-New in version 0.2:
+###New in version 0.2:
  set media :-)
  still not taking the config from the config.yaml - set ip and mac address in the source :-(
 
-Define your media player:
+####Define your media player:
 media_player 3:
+```
   platform: bravia
   host: 192.168.0.12
   name: MyBraviaTV
+```
  
-You could do a list of channels like this:
+####You could do a list of channels like this:
+```
 input_select:
   braviachannel:
     name: braviachannel
@@ -33,8 +36,10 @@ input_select:
       (...)
     icon: mdi:television-guide
     initial: 1 SRF 1 HD
+```
 
-Add some automation like this:
+####Add some automation like this:
+```
 automation:
   alias: TV channel
   trigger:
@@ -45,9 +50,10 @@ automation:
     data_template:
       entity_id: media_player.mybraviatv
       source: "{{ states.input_select.braviachannel.state }}"
+```
 
-
-Group it all like this:
+####Group it all like this:
+```
 group:
   Livingroom:
     name: Livingroom
@@ -56,3 +62,4 @@ group:
       - light.livingcolors_2
       - input_select.braviachannel
       - media_player.mybraviatv
+```
