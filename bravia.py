@@ -1,6 +1,6 @@
 """
 Support for interface with a Bravia TV.
-v0.1 - still sucks. Need to modify code with the ip and mac address :-/
+Version 0.2
 """
 import logging
 import json
@@ -9,10 +9,12 @@ from requests.exceptions import ConnectionError
 from wakeonlan import wol
 from datetime import timedelta
 import homeassistant.util as util
+from time import sleep
 
 from homeassistant.components.media_player import (
     DOMAIN, SUPPORT_NEXT_TRACK, SUPPORT_PAUSE, SUPPORT_PREVIOUS_TRACK,
-    SUPPORT_TURN_OFF, SUPPORT_VOLUME_MUTE, SUPPORT_VOLUME_STEP, SUPPORT_TURN_ON, SERVICE_TOGGLE,
+    SUPPORT_TURN_OFF, SUPPORT_VOLUME_MUTE, SUPPORT_VOLUME_STEP,
+    SUPPORT_TURN_ON, SERVICE_TOGGLE, SUPPORT_SELECT_SOURCE,
     MediaPlayerDevice) 
 from homeassistant.const import (
     CONF_HOST, CONF_NAME, STATE_OFF, STATE_ON, STATE_UNKNOWN)
@@ -29,7 +31,7 @@ MIN_TIME_BETWEEN_FORCED_SCANS = timedelta(milliseconds=100)
 
 SUPPORT_BRAVIA = SUPPORT_PAUSE | SUPPORT_VOLUME_STEP | \
     SUPPORT_VOLUME_MUTE | SUPPORT_PREVIOUS_TRACK | \
-    SUPPORT_NEXT_TRACK | SUPPORT_TURN_ON | SUPPORT_TURN_OFF
+    SUPPORT_NEXT_TRACK | SUPPORT_TURN_ON | SUPPORT_TURN_OFF | SUPPORT_SELECT_SOURCE
 
 
 # pylint: disable=unused-argument
@@ -206,3 +208,45 @@ class BraviaTVDevice(MediaPlayerDevice):
     def media_previous_track(self):
         """Send the previous track command."""
         #self.send_key("KEY_REWIND")
+        
+    def select_source(self, source):
+        """Set the input source."""
+        # test like this: {"entity_id":"media_player.mybraviatv","source":"1 SF DRS"}
+        """
+        The commands for the numbers 0 to 9 are as follows:
+        'Num0': 'AAAAAQAAAAEAAAAJAw==',
+        'Num1': 'AAAAAQAAAAEAAAAAAw==',
+        'Num2': 'AAAAAQAAAAEAAAABAw==',
+        'Num3': 'AAAAAQAAAAEAAAADAw==',
+        'Num4': 'AAAAAQAAAAEAAAADAw==',
+        'Num5': 'AAAAAQAAAAEAAAAEAw==',
+        'Num6': 'AAAAAQAAAAEAAAAFAw==',
+        'Num7': 'AAAAAQAAAAEAAAAGAw==',
+        'Num8': 'AAAAAQAAAAEAAAAHAw==',
+        'Num9': 'AAAAAQAAAAEAAAAIAw==',
+        """
+        dial = str(source.split(' ')[0])
+        print("set source to " + dial)        
+        for c in dial: #dialing 0118 999 881 999 119 7253
+            if c == "0":
+                self.do_ircc('AAAAAQAAAAEAAAAJAw==')
+            if c == "1":
+                self.do_ircc('AAAAAQAAAAEAAAAAAw==')
+            if c == "2":
+                self.do_ircc('AAAAAQAAAAEAAAABAw==')
+            if c == "3":
+                self.do_ircc('AAAAAQAAAAEAAAADAw==')
+            if c == "4":
+                self.do_ircc('AAAAAQAAAAEAAAADAw==')
+            if c == "5":
+                self.do_ircc('AAAAAQAAAAEAAAAEAw==')
+            if c == "6":
+                self.do_ircc('AAAAAQAAAAEAAAAFAw==')
+            if c == "7":
+                self.do_ircc('AAAAAQAAAAEAAAAGAw==')
+            if c == "8":
+                self.do_ircc('AAAAAQAAAAEAAAAHAw==')
+            if c == "9":
+                self.do_ircc('AAAAAQAAAAEAAAAIAw==')
+            sleep(0.5) # sleep a bit in order to send all keys properly
+        #self._receiver.command('input-selector {}'.format(source))
