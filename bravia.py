@@ -1,6 +1,6 @@
 """
 Support for interface with a Bravia TV.
-Version 0.2
+Version 0.3
 """
 import logging
 import json
@@ -19,9 +19,12 @@ from homeassistant.components.media_player import (
 from homeassistant.const import (
     CONF_HOST, CONF_NAME, STATE_OFF, STATE_ON, STATE_UNKNOWN)
 from homeassistant.helpers import validate_config
+from homeassistant.components import discovery
 
 CONF_PORT = "port"
 CONF_TIMEOUT = "timeout"
+CONF_MAC = "mac"
+CONF_PSK = "psk"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,26 +40,26 @@ SUPPORT_BRAVIA = SUPPORT_PAUSE | SUPPORT_VOLUME_STEP | \
 # pylint: disable=unused-argument
 def setup_platform(hass, config, add_devices, discovery_info=None):
     """Setup the Bravia TV platform."""
-    # Validate that all required config options are given
-    if not validate_config({DOMAIN: config}, {DOMAIN: [CONF_HOST]}, _LOGGER):
-        return False
-
-    # Default the entity_name to 'MyBraviaTV'
-    name = config.get(CONF_NAME, 'MyBraviaTV')
-    host = config.get(CONF_HOST)
-    timeout = config.get(CONF_TIMEOUT, 0.001)
-
-    # Generate a config for the Bravia
-    remote_config = {
-        "name": "HomeAssistant",
-        "description": config.get(CONF_NAME, ''),
-        "id": "ha.component.bravia",
-        "host": config.get(CONF_HOST),
-        "timeout": config.get(CONF_TIMEOUT, 0),
-    }
-
-    add_devices([BraviaTVDevice(name, remote_config)])
-
+    #discovery
+    if discovery_info is not None:
+        #_LOGGER.debug('%s', discovery_info)
+        print(discovery_info)
+        print(type(discovery_info))
+        name = 'MyBraviaTV' #discovery_info[0]
+        host = discovery_info[1]
+        mac  = discovery_info[2]
+        _LOGGER.debug("we found a device with info: " + name + " " + host + " " + mac)
+        #timeout = config.get(CONF_TIMEOUT, 0.001)
+        add_devices([BraviaTVDevice(name, discovery_info)])
+        return True
+    # Default the entity_name to 'MyBraviaTV', use host and mac property from conf
+    else:
+        name = config.get(CONF_NAME, 'MyBraviaTV')
+        host = config.get(CONF_HOST)
+        mac  = config.get(CONF_MAC) #'d8d43ccf8f9d'
+        psk  = config.get(CONF_PSK) #how about 8123 ?
+    
+    # Validate that all required config options are given - off for now
 
 # pylint: disable=abstract-method
 class BraviaTVDevice(MediaPlayerDevice):
@@ -65,6 +68,8 @@ class BraviaTVDevice(MediaPlayerDevice):
     # pylint: disable=too-many-public-methods
     def __init__(self, name, config):
         """Initialize the Sony device."""
+        print("setting up the device Bravia")
+        print(config)
         self._name = name
         # Assume that the TV is not muted
         self._muted = False
@@ -73,9 +78,12 @@ class BraviaTVDevice(MediaPlayerDevice):
         self._state = STATE_UNKNOWN #STATE_OFF
         self._remote = None
         self._config = config
+        self._host = config[1]
+        self._mac = config[2]
+        _LOGGER.debug("set up tv as follows: ip:" + self._host + " - mac:" + self._mac)
     
     @classmethod
-    def do_ircc(self, data):
+    def do_ircc(self, host, data):
         sony_xml = \
         """<?xml version="1.0"?>
         <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
@@ -86,40 +94,28 @@ class BraviaTVDevice(MediaPlayerDevice):
           </s:Body>
         </s:Envelope>"""
         try:
-            req = requests.request('POST', 'http://192.168.0.12/sony/IRCC/',
+            req = requests.request('POST', 'http://'+ host +'/sony/IRCC/',
                                headers={'SOAPAction': "urn:schemas-sony-com:service:IRCC:1#X_SendIRCC"},
                                timeout=0.1,
                                data=sony_xml % data)
-            print("sending " + data + " to the TV. We got a reply from the TV and assume its on " + str(req))
+            _LOGGER.debug("sending " + data + " to the TV at "+host+". We got a reply from the TV and assume its on " + str(req))
             self._state = STATE_ON
             return True
-        except:    #ConnectionError as e - This is the correct syntax
-            #print(e)
-            print("sending " + data + " to the TV. We got an error contacting the tv - we assume its off ")
+        except:
+            _LOGGER.debug("sending " + data + " to the TV at "+host+". We got an error contacting the tv - we assume its off ")
             self._state = STATE_OFF
             return False
-        """
-        req = requests.request('POST', 'http://192.168.0.12/sony/IRCC/',
-                               headers={'SOAPAction': "urn:schemas-sony-com:service:IRCC:1#X_SendIRCC"},
-                               data=sony_xml % data)
-        """
-        #return req
     
     @util.Throttle(MIN_TIME_BETWEEN_SCANS, MIN_TIME_BETWEEN_FORCED_SCANS)    
     def update(self):
         """Retrieve the latest data."""
-        # Send an empty key to see if we are still connected
-        #return self.do_ircc('*SEPOWR################') #AAAAAQAAAAEAAABlAw== -> confirm
-        print("updating state of the bravia tv")
         try:
-            #print("check for tv...")
-            req = requests.request('GET', 'http://192.168.0.12/', timeout=0.001)
+            _LOGGER.debug('check for tv... http://'+self._host+'/')
+            req = requests.request('GET', 'http://'+self._host+'/', timeout=0.1)
         except:
-            #print("nah")
             self._state = STATE_OFF
             return False
         else:
-            #print("yeah")
             self._state = STATE_ON
             return True
 
@@ -158,28 +154,28 @@ class BraviaTVDevice(MediaPlayerDevice):
 
     def turn_on(self):
         """Turn the media player on."""
-        #self.do_ircc('AAAAAQAAAAEAAAAAAw==') #PowerOn i guess would be AAAAAQAAAAEAAAAVAw== so we send channel one
-        print("sending magic packet to turn on tv")
+        #self.do_ircc(self._host,'AAAAAQAAAAEAAAAAAw==') #PowerOn i guess would be AAAAAQAAAAEAAAAVAw== so we send channel one
+        _LOGGER.debug("sending magic packet to '+self._mac+' to turn on tv")
         self._state = STATE_ON
-        wol.send_magic_packet('d8d43ccf8f9d')
+        wol.send_magic_packet(self._mac)
         
     def turn_off(self):
         """Turn off media player."""
         print("turn off tv")
         self._state = STATE_OFF
-        return self.do_ircc('AAAAAQAAAAEAAAAvAw==') #power off
+        return self.do_ircc(self._host,'AAAAAQAAAAEAAAAvAw==') #power off
 
     def volume_up(self):
         """Volume up the media player."""
-        return self.do_ircc('AAAAAQAAAAEAAAASAw==') #VolumeUp
+        return self.do_ircc(self._host,'AAAAAQAAAAEAAAASAw==') #VolumeUp
 
     def volume_down(self):
         """Volume down media player."""
-        return self.do_ircc('AAAAAQAAAAEAAAATAw==') #VolumeDown
+        return self.do_ircc(self._host,'AAAAAQAAAAEAAAATAw==') #VolumeDown
 
     def mute_volume(self, mute):
         """Send mute command."""
-        return self.do_ircc('AAAAAQAAAAEAAAAUAw==') #Mute
+        return self.do_ircc(self._host,'AAAAAQAAAAEAAAAUAw==') #Mute
 
     def media_play_pause(self):
         """Simulate play pause media player."""
@@ -201,9 +197,6 @@ class BraviaTVDevice(MediaPlayerDevice):
     def media_next_track(self):
         """Send next track command."""
         #self.send_key("KEY_FF")
-        #hack for trying out the turn on WoL feature - disregard
-        print("sending magic packet to turn on tv d8d43ccf8f9d")
-        wol.send_magic_packet('d8d43ccf8f9d')
 
     def media_previous_track(self):
         """Send the previous track command."""
@@ -217,7 +210,7 @@ class BraviaTVDevice(MediaPlayerDevice):
         'Num0': 'AAAAAQAAAAEAAAAJAw==',
         'Num1': 'AAAAAQAAAAEAAAAAAw==',
         'Num2': 'AAAAAQAAAAEAAAABAw==',
-        'Num3': 'AAAAAQAAAAEAAAADAw==',
+        'Num3': 'AAAAAQAAAAEAAAACAw==',
         'Num4': 'AAAAAQAAAAEAAAADAw==',
         'Num5': 'AAAAAQAAAAEAAAAEAw==',
         'Num6': 'AAAAAQAAAAEAAAAFAw==',
@@ -226,27 +219,26 @@ class BraviaTVDevice(MediaPlayerDevice):
         'Num9': 'AAAAAQAAAAEAAAAIAw==',
         """
         dial = str(source.split(' ')[0])
-        print("set source to " + dial)        
+        _LOGGER.debug("set source to " + dial)        
         for c in dial: #dialing 0118 999 881 999 119 7253
             if c == "0":
-                self.do_ircc('AAAAAQAAAAEAAAAJAw==')
+                self.do_ircc(self._host,'AAAAAQAAAAEAAAAJAw==')
             if c == "1":
-                self.do_ircc('AAAAAQAAAAEAAAAAAw==')
+                self.do_ircc(self._host,'AAAAAQAAAAEAAAAAAw==')
             if c == "2":
-                self.do_ircc('AAAAAQAAAAEAAAABAw==')
+                self.do_ircc(self._host,'AAAAAQAAAAEAAAABAw==')
             if c == "3":
-                self.do_ircc('AAAAAQAAAAEAAAADAw==')
+                self.do_ircc(self._host,'AAAAAQAAAAEAAAACAw==')
             if c == "4":
-                self.do_ircc('AAAAAQAAAAEAAAADAw==')
+                self.do_ircc(self._host,'AAAAAQAAAAEAAAADAw==')
             if c == "5":
-                self.do_ircc('AAAAAQAAAAEAAAAEAw==')
+                self.do_ircc(self._host,'AAAAAQAAAAEAAAAEAw==')
             if c == "6":
-                self.do_ircc('AAAAAQAAAAEAAAAFAw==')
+                self.do_ircc(self._host,'AAAAAQAAAAEAAAAFAw==')
             if c == "7":
-                self.do_ircc('AAAAAQAAAAEAAAAGAw==')
+                self.do_ircc(self._host,'AAAAAQAAAAEAAAAGAw==')
             if c == "8":
-                self.do_ircc('AAAAAQAAAAEAAAAHAw==')
+                self.do_ircc(self._host,'AAAAAQAAAAEAAAAHAw==')
             if c == "9":
-                self.do_ircc('AAAAAQAAAAEAAAAIAw==')
-            sleep(0.5) # sleep a bit in order to send all keys properly
-        #self._receiver.command('input-selector {}'.format(source))
+                self.do_ircc(self._host,'AAAAAQAAAAEAAAAIAw==')
+            sleep(0.25) # sleep a bit in order to send all keys properly
