@@ -1,10 +1,11 @@
 """
 Support for interface with a Bravia TV.
-Version 0.3
+Version 0.4
 """
 import logging
 import json
 import requests
+import os
 from requests.exceptions import ConnectionError
 from wakeonlan import wol
 from datetime import timedelta
@@ -17,7 +18,7 @@ from homeassistant.components.media_player import (
     SUPPORT_TURN_ON, SERVICE_TOGGLE, SUPPORT_SELECT_SOURCE,
     MediaPlayerDevice) 
 from homeassistant.const import (
-    CONF_HOST, CONF_NAME, STATE_OFF, STATE_ON, STATE_UNKNOWN)
+    CONF_FILENAME, CONF_HOST, CONF_NAME, STATE_OFF, STATE_ON, STATE_UNKNOWN)
 from homeassistant.helpers import validate_config
 from homeassistant.components import discovery
 
@@ -25,6 +26,7 @@ CONF_PORT = "port"
 CONF_TIMEOUT = "timeout"
 CONF_MAC = "mac"
 CONF_PSK = "psk"
+BRAVIA_CHANNEL_LIST_FILE = "channel_list.txt"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,15 +44,21 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     """Setup the Bravia TV platform."""
     #discovery
     if discovery_info is not None:
-        #_LOGGER.debug('%s', discovery_info)
-        print(discovery_info)
-        print(type(discovery_info))
+        _LOGGER.debug('%s', discovery_info)
         name = 'MyBraviaTV' #discovery_info[0]
         host = discovery_info[1]
         mac  = discovery_info[2]
         _LOGGER.debug("we found a device with info: " + name + " " + host + " " + mac)
         #timeout = config.get(CONF_TIMEOUT, 0.001)
-        add_devices([BraviaTVDevice(name, discovery_info)])
+        path = hass.config.path(BRAVIA_CHANNEL_LIST_FILE) #read the file in the config location
+        if not os.path.isfile(path):
+            return None
+        try:
+            with open(path) as channel_list:
+                source_list = channel_list.read().splitlines()
+        except (ValueError, AttributeError, StopIteration):
+            _LOGGER.info("Error reading " + BRAVIA_CHANNEL_LIST_FILE)
+        add_devices([BraviaTVDevice(name, discovery_info, source_list)])
         return True
     # Default the entity_name to 'MyBraviaTV', use host and mac property from conf
     else:
@@ -61,26 +69,29 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     
     # Validate that all required config options are given - off for now
 
+
 # pylint: disable=abstract-method
 class BraviaTVDevice(MediaPlayerDevice):
     """Representation of a Bravia TV."""
 
     # pylint: disable=too-many-public-methods
-    def __init__(self, name, config):
+    def __init__(self, name, config, source_list):
         """Initialize the Sony device."""
-        print("setting up the device Bravia")
-        print(config)
+        _LOGGER.info("setting up the device Bravia")
         self._name = name
-        # Assume that the TV is not muted
-        self._muted = False
-        # Assume that the TV is in Play mode
-        self._playing = True
-        self._state = STATE_UNKNOWN #STATE_OFF
+        self._muted = False # Assume that the TV is not muted
+        self._playing = True # Assume that the TV is in Play mode
+        self._state = STATE_UNKNOWN
         self._remote = None
+        self._current_source = None
         self._config = config
         self._host = config[1]
         self._mac = config[2]
+        if source_list is not None:
+            self._source_list = source_list
+            _LOGGER.debug("channel list: " + str(self._source_list))
         _LOGGER.debug("set up tv as follows: ip:" + self._host + " - mac:" + self._mac)
+        
     
     @classmethod
     def do_ircc(self, host, data):
@@ -93,6 +104,7 @@ class BraviaTVDevice(MediaPlayerDevice):
             </u:X_SendIRCC>
           </s:Body>
         </s:Envelope>"""
+        #for no insert your PSK above... next time.
         try:
             req = requests.request('POST', 'http://'+ host +'/sony/IRCC/',
                                headers={'SOAPAction': "urn:schemas-sony-com:service:IRCC:1#X_SendIRCC"},
@@ -152,16 +164,26 @@ class BraviaTVDevice(MediaPlayerDevice):
         """Flag of media commands that are supported."""
         return SUPPORT_BRAVIA
 
+    @property
+    def source(self):
+        """Return the current input source."""
+        return self._current_source
+
+    @property
+    def source_list(self):
+        """List of available input sources."""
+        return self._source_list
+
     def turn_on(self):
         """Turn the media player on."""
         #self.do_ircc(self._host,'AAAAAQAAAAEAAAAAAw==') #PowerOn i guess would be AAAAAQAAAAEAAAAVAw== so we send channel one
-        _LOGGER.debug("sending magic packet to '+self._mac+' to turn on tv")
+        _LOGGER.info("sending magic packet to '+self._mac+' to turn on tv")
         self._state = STATE_ON
         wol.send_magic_packet(self._mac)
         
     def turn_off(self):
         """Turn off media player."""
-        print("turn off tv")
+        _LOGGER.info("turn off tv")
         self._state = STATE_OFF
         return self.do_ircc(self._host,'AAAAAQAAAAEAAAAvAw==') #power off
 
